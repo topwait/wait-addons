@@ -1,7 +1,7 @@
 {
     "name": "topwait/think-addons",
+    "description": "The ThinkPHP6 Addons Package",
     "license": "Apache-2.0",
-    "description": "think-addons是一个基于TP6的插件扩展",
     "authors": [
         {
             "name": "windy",
@@ -20,6 +20,21 @@
         },
         "files": [
             "src/helper.php"
+        ]
+    },
+    "extra": {
+        "think": {
+            "services": [
+                "think\\addons\\Service"
+            ],
+            "config":{
+                "addons": "src/config.php"
+            }
+        }
+    },
+    "scripts" : {
+        "post-install-cmd": [
+            "php think addons:config"
         ]
     }
 }
