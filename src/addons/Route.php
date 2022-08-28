@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace think\addons;
 
+use think\facade\Request;
 use think\helper\Str;
 use think\facade\Event;
 use think\facade\Config;
@@ -58,6 +59,11 @@ class Route
         $viewConfig['view_path'] = is_dir($appViewPath) ? $appViewPath : $pubViewPath;
         Config::set($viewConfig, 'view');
         View::engine('Think')->config($viewConfig);
+        if (is_dir($appViewPath) && $module) {
+            $viewController = $request->controller();
+            $viewController = substr_replace($viewController, '', 0, strlen($module)+1);
+            Request::setController($viewController);
+        }
 
         // 生成控制器对象
         $vars = [];

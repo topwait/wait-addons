@@ -278,9 +278,11 @@ class Service extends \think\Service
      */
     private function loadApp()
     {
-        $app   = app();
-        $rules = explode('/', $app->request->url());
-        [$addon, $module, $controller, $action] = array_splice($rules, 2, count($rules)-1);
+        $app    = app();
+        $rules  = explode('/', $app->request->url());
+        $rules  = array_splice($rules, 2, count($rules)-1);
+        $addon  = $rules['addon']  ?? '';
+        $module = $rules['module'] ?? '';
 
         // 加载插件应用级配置
         if (is_dir($this->addonsPath . $addon)) {

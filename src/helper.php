@@ -5,6 +5,7 @@ use think\Console;
 use think\facade\Event;
 use think\facade\Route;
 use think\helper\Str;
+use think\route\Url;
 
 define('DS', DIRECTORY_SEPARATOR);
 
@@ -24,7 +25,7 @@ spl_autoload_register(function ($class) {
     $class = ltrim($class, '\\');
     $rootPath  = app()->getRootPath();
     $namespace = 'addons';
-    if (strpos($class, $namespace) === 0) {
+    if (str_starts_with($class, $namespace)) {
         $class = substr($class, strlen($namespace));
         $path  = '';
         if (($pos = strripos($class, '\\')) !== false) {
@@ -52,9 +53,9 @@ if (!function_exists('hook')) {
      * @param string $event 钩子名称
      * @param array|null $params 传入参数
      * @param bool $once 是否只返回一个结果
-     * @return mixed
+     * @return string
      */
-    function hook(string $event, $params = null, bool $once = false)
+    function hook(string $event, $params = null, bool $once = false): string
     {
         $result = Event::trigger($event, $params, $once);
         return join('', $result);
@@ -69,9 +70,9 @@ if (!function_exists('addons_url')) {
      * @param array $param
      * @param bool|string $suffix 生成的URL后缀
      * @param bool|string $domain 域名
-     * @return bool|string
+     * @return Url
      */
-    function addons_url(string $url = '', $param = [], $suffix = true, $domain = false)
+    function addons_url(string $url = '', $param = [], $suffix = true, $domain = false): Url
     {
         $request = app('request');
         if (!is_array($param)) {
