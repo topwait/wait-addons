@@ -11,6 +11,9 @@ use think\facade\Cache;
 use think\facade\Event;
 use think\addons\middleware\Addons;
 
+use RecursiveIteratorIterator;
+use RecursiveDirectoryIterator;
+
 class Service extends \think\Service
 {
     /**
@@ -24,8 +27,6 @@ class Service extends \think\Service
      */
     public function register()
     {
-        // 绑定插件容器
-        $this->app->bind('addons', Service::class);
         // 获取插件路径
         $this->addonsPath = $this->getAddonsPath();
         // 加载插件语言
@@ -40,6 +41,8 @@ class Service extends \think\Service
         $this->loadRoutes();
         // 加载插件配置
         $this->loadApp();
+        // 绑定插件容器
+        $this->app->bind('addons', Service::class);
     }
 
     /**
@@ -60,6 +63,7 @@ class Service extends \think\Service
                     if (!$val) {
                         continue;
                     }
+
                     if (is_array($val)) {
                         if (isset($val['rule']) && isset($val['domain'])) {
                             $domain = $val['domain'];
@@ -260,6 +264,7 @@ class Service extends \think\Service
                     continue;
                 }
 
+                $addonRouteFile = $this->addonsPath . $addonName . DS . $mdir . DS . 'route.php';
                 $addonsRouteDir = $this->addonsPath . $addonName . DS . $mdir . DS . 'route' . DS;
                 if (file_exists($addonsRouteDir) && is_dir($addonsRouteDir)) {
                     $files = glob($addonsRouteDir . '*.php');
@@ -268,6 +273,8 @@ class Service extends \think\Service
                             $this->loadRoutesFrom($file);;
                         }
                     }
+                } elseif (file_exists($addonRouteFile) && is_file($addonRouteFile)) {
+                    $this->loadRoutesFrom($addonRouteFile);;
                 }
             }
         }
@@ -278,39 +285,56 @@ class Service extends \think\Service
      */
     private function loadApp()
     {
-        $app    = app();
-        $rules  = explode('/', $app->request->url());
-        $rules  = array_splice($rules, 2, count($rules)-1);
-        $addon  = $rules['addon']  ?? '';
-        $module = $rules['module'] ?? '';
+        $app   = app();
+        $rules = explode('/', ltrim($app->request->url(), '/'));
+        $addon  = $rules[0] ?? '';
+        $module = $rules[1] ?? '';
+        if ($addon !== 'addons') {
+            if (($rules[1]??'') === 'addons') {
+                $addon  = $rules[1] ?? '';
+                $module = $rules[2] ?? '';
+            }
+        }
+
+        if ($addon !== 'addons' || !$module) {
+            $routes = (array) Config::get('addons.route', []);
+            $domain = explode('.', httpDomain())[0];
+            foreach ($routes as $key => $val) {
+                if (!$val) { continue; }
+                if (is_array($val) && trim($val['domain']) === $domain) {
+                    $addon  = trim($val['addons']);
+                    $module = trim($val['module']);
+                }
+            }
+        }
 
         // 加载插件应用级配置
-        if (is_dir($this->addonsPath . $addon)) {
-            foreach (scandir($this->addonsPath . $addon) as $name) {
+        if (is_dir($this->addonsPath)) {
+            foreach (scandir($this->addonsPath) as $name) {
                 if (in_array($name, ['.', '..', 'public', 'view', 'middleware'])) {
                     continue;
                 }
 
                 $appConfigs = ['common.php', 'middleware.php', 'provider.php', 'event.php'];
                 if (in_array($name, $appConfigs)) {
-                    if (is_file($this->addonsPath . $addon . DS . 'common.php')) {
-                        include_once $this->addonsPath . $addon . DS . 'common.php';
+                    if (is_file($this->addonsPath . DS . 'common.php')) {
+                        include_once $this->addonsPath . DS . 'common.php';
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . 'middleware.php')) {
-                        $app->middleware->import(include $this->addonsPath . $addon . DS . 'middleware.php', 'route');
+                    if (is_file($this->addonsPath . DS . 'middleware.php')) {
+                        $app->middleware->import(include $this->addonsPath . DS . 'middleware.php', 'route');
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . 'provider.php')) {
-                        $app->bind(include $this->addonsPath . $addon . DS . 'provider.php');
+                    if (is_file($this->addonsPath . DS . 'provider.php')) {
+                        $app->bind(include $this->addonsPath . DS . 'provider.php');
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . 'event.php')) {
-                        $app->loadEvent(include $this->addonsPath . $addon . DS . 'event.php');
+                    if (is_file($this->addonsPath . DS . 'event.php')) {
+                        $app->loadEvent(include $this->addonsPath . DS . 'event.php');
                     }
 
                     $commands = [];
-                    $addonsConfigDir = $this->addonsPath . $addon . DS . 'config' . DS;
+                    $addonsConfigDir = $this->addonsPath . DS . 'config' . DS;
                     if (is_dir($addonsConfigDir)) {
                         $files = [];
                         $files = array_merge($files, glob($addonsConfigDir . '*' . $app->getConfigExt()));
@@ -331,7 +355,7 @@ class Service extends \think\Service
                         }
                     }
 
-                    $addonsLangDir = $this->addonsPath . $addon . DS . 'lang' . DS;
+                    $addonsLangDir = $this->addonsPath . DS . 'lang' . DS;
                     if (is_dir($addonsLangDir)) {
                         $files = glob($addonsLangDir . $app->lang->defaultLangSet() . '.php');
                         foreach ($files as $file) {
@@ -345,32 +369,32 @@ class Service extends \think\Service
         }
 
         // 加载插件模块级配置
-        if (is_dir($this->addonsPath . $addon . DS . $module)) {
-            foreach (scandir($this->addonsPath . $addon . DS . $module) as $modName) {
+        if (is_dir($this->addonsPath . $module)) {
+            foreach (scandir($this->addonsPath . $module) as $modName) {
                 if (in_array($modName, ['.', '..', 'public', 'view'])) {
                     continue;
                 }
 
                 $moduleConfigs = ['common.php', 'middleware.php', 'provider.php', 'event.php', 'config'];
                 if (in_array($modName, $moduleConfigs)) {
-                    if (is_file($this->addonsPath . $addon . DS . $module . DS . 'common.php')) {
-                        include_once $this->addonsPath . $addon . DS . $module . DS . 'common.php';
+                    if (is_file($this->addonsPath . $module . DS . 'common.php')) {
+                        include_once $this->addonsPath . $module . DS . 'common.php';
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . $module . DS . 'middleware.php')) {
-                        $app->middleware->import(include $this->addonsPath . $addon . DS . $module . DS . 'middleware.php', 'route');
+                    if (is_file($this->addonsPath . $module . DS . 'middleware.php')) {
+                        $app->middleware->import(include $this->addonsPath . $module . DS . 'middleware.php', 'route');
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . $module . DS . 'provider.php')) {
-                        $app->bind(include $this->addonsPath . $addon . DS . $module . DS . 'provider.php');
+                    if (is_file($this->addonsPath . $module . DS . 'provider.php')) {
+                        $app->bind(include $this->addonsPath . $module . DS . 'provider.php');
                     }
 
-                    if (is_file($this->addonsPath . $addon . DS . $module . DS . 'event.php')) {
-                        $app->loadEvent(include $this->addonsPath . $addon . DS . $module . DS . 'event.php');
+                    if (is_file($this->addonsPath . $module . DS . 'event.php')) {
+                        $app->loadEvent(include $this->addonsPath . $module . DS . 'event.php');
                     }
 
                     $commands = [];
-                    $moduleConfigDir = $this->addonsPath . $addon . DS . $module . DS . 'config' . DS;
+                    $moduleConfigDir = $this->addonsPath . $module . DS . 'config' . DS;
                     if (is_dir($moduleConfigDir)) {
                         $files = [];
                         $files = array_merge($files, glob($moduleConfigDir . '*' . $app->getConfigExt()));
@@ -389,7 +413,7 @@ class Service extends \think\Service
                         }
                     }
 
-                    $addonsLangDir = $this->addonsPath . $addon . DS . $module . DS . 'lang' . DS;
+                    $addonsLangDir = $this->addonsPath . $module . DS . 'lang' . DS;
                     if (is_dir($addonsLangDir)) {
                         $files = glob($addonsLangDir . $app->lang->defaultLangSet() . '.php');
                         foreach ($files as $file) {
@@ -404,7 +428,121 @@ class Service extends \think\Service
     }
 
     /**
+     * 拷贝目录
+     *
+     * @param string $source (原始目录路径)
+     * @param string $target (目标目录路径)
+     * @author windy
+     */
+    private static function copyDir(string $source, string $target)
+    {
+        if (!is_dir($target)) {
+            mkdir($target, 0755, true);
+        }
+
+        foreach (
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($source, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            ) as $item
+        ) {
+            if ($item->isDir()) {
+                $sontDir = $target . $iterator->getSubPathName();
+                if (!is_dir($sontDir)) {
+                    mkdir($sontDir, 0755, true);
+                }
+            } else {
+                $to = rtrim(rtrim($target, '\\'), '/');
+                copy($item->getPathName(), $to . DS . $iterator->getSubPathName());
+            }
+        }
+    }
+
+    /**
+     * 删除目录
+     *
+     * @param string $dir (目录路径)
+     * @return bool
+     * @author windy
+     */
+    private static function deleteDir(string $dir): bool
+    {
+        // 验证是否目录
+        if(!is_dir($dir)) return true;
+
+        // 递归删除文件
+        $dh=opendir($dir);
+        while ($file=readdir($dh)) {
+            if($file!="." && $file!="..") {
+                $fullpath=$dir."/".$file;
+                if(!is_dir($fullpath)) {
+                    @unlink($fullpath);
+                } else {
+                    self::deleteDir($fullpath);
+                }
+            }
+        }
+        closedir($dh);
+
+        // 删除当前目录
+        if(@rmdir($dir)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * 移除空目录
+     *
+     * @param string $dir (目录路径)
+     * @author windy
+     */
+    private static function removeEmptyDir(string $dir)
+    {
+        try {
+            $isDirEmpty = !(new \FilesystemIterator($dir))->valid();
+            if ($isDirEmpty) {
+                @rmdir($dir);
+                self::removeEmptyDir(dirname($dir));
+            }
+        } catch (\UnexpectedValueException $e) {
+
+        } catch (\Exception $e) {
+
+        }
+    }
+
+    /**
+     * 获设插件RC
+     *
+     * @param string $name   (插件名称)
+     * @param array $changed (变动后数据)
+     * @return array
+     * @author windy
+     */
+    private static function addonrc(string $name, array $changed = []): array
+    {
+        $addonConfigFile = self::getAddonsDirs($name) . '.addonrc';
+
+        $config = [];
+        if (is_file($addonConfigFile)) {
+            $config = (array)json_decode(file_get_contents($addonConfigFile), true);
+        }
+
+        $config = array_merge($config, $changed);
+        if ($changed) {
+            file_put_contents($addonConfigFile, json_encode($config, JSON_UNESCAPED_UNICODE));
+        }
+
+        return $config;
+    }
+
+    /**
      * 获取插件路径
+     *
+     * @return string
+     * @author windy
      */
     public function getAddonsPath(): string
     {
@@ -416,16 +554,162 @@ class Service extends \think\Service
     }
 
     /**
-     * 获取插件配置
+     * 获取插件目录
+     *
+     * @param string $name
+     * @return string
+     * @author windy
      */
-    public function getAddonsConfig(): array
+    public static function getAddonsDirs(string $name)
     {
-        $name = $this->app->request->addon;
-        $addon = get_addons_instance($name);
-        if (!$addon) {
-            return [];
-        }
-        return $addon->getConfig();
+        return app()->getRootPath() . 'addons' . DS . $name . DS;
     }
 
+    /**
+     * 取插件全局文件
+     *
+     * @param string $name (插件名称)
+     * @param bool $onlyConflict (是否只返回冲突文件)
+     * @return array
+     * @author windy
+     */
+    public static function getGlobalAddonsFiles(string $name, bool $onlyConflict = false): array
+    {
+        $list = [];
+        $addonDir = app()->getRootPath() . 'addons' . DS . $name . DS;
+        $assetDir = get_target_assets_dir($name);
+
+        // 扫描插件目录是否有覆盖的文件
+        foreach (['app', 'public'] as $k => $dirName) {
+            // 检测目录是否存在
+            $addonPublicPath = $addonDir . $dirName . DS;
+            if (!is_dir($addonPublicPath)) {
+                continue;
+            }
+
+            // 匹配出所有的文件
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($addonPublicPath, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST);
+
+            foreach ($files as $fileInfo) {
+                if ($fileInfo->isFile()) {
+                    // 获取出插件对应目录路径
+                    $filePath = $fileInfo->getPathName();
+
+                    // 处理插件基本的目录路径
+                    $path = str_replace($addonDir, '', $filePath);
+
+                    // 对插件静态文件特殊处理
+                    if ($dirName === 'public') {
+                        $path = str_replace(root_path(), '', $assetDir) . str_replace($addonDir . $dirName . DS, '', $filePath);
+                    }
+
+                    if ($onlyConflict) {
+                        // 与插件原文件有冲突
+                        $destPath = root_path() . $path;
+                        if (is_file($destPath)) {
+                            if (filesize($filePath) != filesize($destPath) || md5_file($filePath) != md5_file($destPath)) {
+                                $list[] = $path;
+                            }
+                        }
+                    } else {
+                        // 与插件原文件无冲突
+                        $list[] = $path;
+                    }
+                }
+            }
+        }
+
+        return array_filter(array_unique($list));
+    }
+
+
+    /**
+     * 安装插件应用
+     *
+     * @param string $name
+     * @param false $isDelete
+     * @author windy
+     */
+    public static function installAddonsApp(string $name, $isDelete = false): void
+    {
+        // 刷新插件配置缓存
+        $files = self::getGlobalAddonsFiles($name);
+        if ($files) {
+            self::addonrc($name, ['files' => $files]);
+        }
+
+        // 复制应用到全局位
+        foreach (['app', 'public'] as $k => $dir) {
+            $sourceDir = self::getAddonsDirs($name) . $dir;
+            $targetDir = app()->getBasePath();
+
+            if ($dir === 'public') {
+                $targetDir = app()->getRootPath() . $dir . DS . 'static' . DS . 'addons' . DS . $name . DS;
+            }
+
+            if (is_dir($sourceDir)) {
+                self::copyDir($sourceDir, $targetDir);
+                if ($isDelete) {
+                    self::deleteDir(self::getAddonsDirs($name) . $dir);
+                }
+            }
+        }
+    }
+
+    /**
+     * 卸载插件应用
+     *
+     * @param string $name
+     * @author windy
+     */
+    public static function uninstallAddonsApp(string $name): void
+    {
+        $addonRc  = self::addonrc($name);
+        $addonDir = self::getAddonsDirs($name);
+        $filesArr = self::getGlobalAddonsFiles($name);
+        $targetAssetsDir = get_target_assets_dir($name);
+
+        // 把散布在全局的文件复制回插件目录
+        if ($addonRc && isset($addonRc['files']) && is_array($addonRc['files'])) {
+            foreach ($addonRc['files'] as $index => $item) {
+                // 避免不同服务器路径不一样
+                $item = str_replace(['/', '\\'], DS, $item);
+                $path = root_path() . $item;
+
+                // 针对静态资源的特殊的处理
+                if (stripos($item, str_replace(root_path(), '', $targetAssetsDir)) === 0) {
+                    $baseAssert = str_replace(root_path(), '', $targetAssetsDir);
+                    $item = 'public' . DS . str_replace($baseAssert, '', $item);
+                }
+
+                // 检查插件目录不存在则创建
+                $itemBaseDir = dirname($addonDir . $item);
+                if (!is_dir($itemBaseDir)) {
+                    @mkdir($itemBaseDir, 0755, true);
+                }
+
+                // 检查如果是文件则移动位置
+                if (is_file($path)) {
+                    @copy($path, $addonDir.$item);
+                }
+            }
+            $filesArr = $addonRc['files'];
+        }
+
+        // 移除插件的文件
+        $dirs = [];
+        foreach ($filesArr as $path) {
+            $file = root_path() . $path;
+            $dirs[] = dirname($file);
+            @unlink($file);
+        }
+
+        // 移除插件空目录
+        $dirs = array_filter(array_unique($dirs));
+        foreach ($dirs as $path) {
+            self::removeEmptyDir($path);
+        }
+    }
 }
