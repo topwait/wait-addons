@@ -1,12 +1,17 @@
 <?php
 declare(strict_types=1);
 
+use Symfony\Component\VarExporter\VarExporter;
 use think\Console;
+use think\facade\Config;
 use think\facade\Event;
 use think\facade\Route;
+use think\facade\Db;
 use think\helper\Str;
+use think\addons\Service;
+use think\route\Url;
 
-define('DS', DIRECTORY_SEPARATOR);
+const DS = DIRECTORY_SEPARATOR;
 
 /**
  * 插件控制台类载入
@@ -24,7 +29,7 @@ spl_autoload_register(function ($class) {
     $class = ltrim($class, '\\');
     $rootPath  = app()->getRootPath();
     $namespace = 'addons';
-    if (strpos($class, $namespace) === 0) {
+    if (str_starts_with($class, $namespace)) {
         $class = substr($class, strlen($namespace));
         $path  = '';
         if (($pos = strripos($class, '\\')) !== false) {
@@ -45,16 +50,51 @@ spl_autoload_register(function ($class) {
     return false;
 });
 
+if (!function_exists('httpType')) {
+    /**
+     * 获取HTTP类型
+     *
+     * @return string (http:// 或 https://)
+     * @author windy
+     */
+    function httpType(): string
+    {
+        $domain = request()->domain();
+        if (str_starts_with($domain, 'https://')) {
+            return 'https://';
+        }
+
+        return 'http:'.'//';
+    }
+}
+
+if (!function_exists('httpDomain')) {
+    /**
+     * 不带协议的域名
+     *
+     * @return string|string[]
+     * @author windy
+     */
+    function httpDomain(): array|string
+    {
+        $domain = request()->domain();
+        if (str_starts_with($domain, 'https://')) {
+            return str_replace('https://', '', $domain);
+        }
+        return str_replace('http:'.'//', '', $domain);
+    }
+}
+
 if (!function_exists('hook')) {
     /**
      * 处理插件钩子事件
      *
      * @param string $event 钩子名称
-     * @param array|null $params 传入参数
+     * @param mixed $params 传入参数
      * @param bool $once 是否只返回一个结果
-     * @return mixed
+     * @return string
      */
-    function hook(string $event, $params = null, bool $once = false)
+    function hook(string $event, mixed $params = null, bool $once = false): string
     {
         $result = Event::trigger($event, $params, $once);
         return join('', $result);
@@ -66,12 +106,13 @@ if (!function_exists('addons_url')) {
      * 插件显示内容里生成访问插件的url
      *
      * @param string $url 地址格式：插件名/模块/控制器/方法 或者只有方法
-     * @param array $param
+     * @param array $param 参数
      * @param bool|string $suffix 生成的URL后缀
      * @param bool|string $domain 域名
-     * @return bool|string
+     * @return Url
+     * @author windy
      */
-    function addons_url(string $url = '', $param = [], $suffix = true, $domain = false)
+    function addons_url(string $url = '', array $param = [], bool|string $suffix = true, bool|string $domain = false): Url
     {
         $request = app('request');
         if (!is_array($param)) {
@@ -90,7 +131,6 @@ if (!function_exists('addons_url')) {
             $url = parse_url($url);
             if (isset($url['scheme'])) {
                 $addons     = strtolower($url['scheme']);
-                $module     = lcfirst(array_pop($route));
                 $controller = trim($url['host']);
                 $action     = trim($url['path'], '/');
             } else {
@@ -110,7 +150,25 @@ if (!function_exists('addons_url')) {
             }
         }
 
-        return Route::buildUrl("@addons/{$addons}/{$controller}/{$action}", $param)->suffix($suffix)->domain($domain);
+        return Route::buildUrl("@addons/$addons/$controller/$action", $param)->suffix($suffix)->domain($domain);
+    }
+}
+
+if (!function_exists('addons_path')) {
+    /**
+     * 获取插件基础目录
+     *
+     * @param string $name 插件名称
+     * @return string
+     * @author windy
+     */
+    function addons_path(string $name=''): string
+    {
+        $path = root_path() . 'addons' . DS;
+        if (trim($name)) {
+            return $path . $name . DS;
+        }
+        return $path;
     }
 }
 
@@ -119,9 +177,10 @@ if (!function_exists('get_addons_instance')) {
      * 获取插件的单例
      *
      * @param string $name 插件名
-     * @return mixed|null
+     * @return mixed
+     * @author windy
      */
-    function get_addons_instance(string $name)
+    function get_addons_instance(string $name): mixed
     {
         static $_addons = [];
         if (isset($_addons[$name])) {
@@ -137,21 +196,22 @@ if (!function_exists('get_addons_instance')) {
     }
 }
 
-if (!function_exists('get_addons_info')) {
+if (!function_exists('get_addons_config')) {
     /**
-     * 读取插件基础信息
+     * 获取插件的配置
      *
-     * @param string $name 插件名
+     * @param $name (插件名称)
      * @return array
+     * @author windy
      */
-    function get_addons_info(string $name): array
+    function get_addons_config($name): array
     {
         $addon = get_addons_instance($name);
         if (!$addon) {
             return [];
         }
 
-        return $addon->getInfo();
+        return $addon->getConfig($name);
     }
 }
 
@@ -164,6 +224,7 @@ if (!function_exists('get_addons_class')) {
      * @param null $class    当前类名
      * @param string $module 模块名
      * @return string
+     * @author windy
      */
     function get_addons_class(string $name, string $type = 'hook', $class = null, string $module = 'index'): string
     {
@@ -180,7 +241,11 @@ if (!function_exists('get_addons_class')) {
 
         switch ($type) {
             case 'controller':
-                $namespace = '\\addons\\' . $name . '\\' . $module . '\\controller\\' . $class;
+                if ($module) {
+                    $namespace = '\\addons\\' . $name . '\\' . $module . '\\controller\\' . $class;
+                } else {
+                    $namespace = '\\addons\\' . $name . '\\controller\\' . $class;
+                }
                 break;
             default:
                 $namespace = '\\addons\\' . $name . '\\Plugin';
@@ -190,4 +255,367 @@ if (!function_exists('get_addons_class')) {
     }
 }
 
+if (!function_exists('get_addons_list')) {
+    /**
+     * 获取本地插件列表
+     *
+     * @return array
+     * @author windy
+     */
+    function get_addons_list(): array
+    {
+        $service = new Service(app());
+        $addonsPath = $service->getAddonsPath();
+        foreach (scandir($addonsPath) as $name) {
+            if (in_array($name, ['.', '..'])) {
+                continue;
+            }
 
+            if (is_file($addonsPath . $name)) {
+                continue;
+            }
+
+            $addonDir = $addonsPath . $name . DS;
+            if (!is_dir($addonDir)) {
+                continue;
+            }
+
+            if (!is_file($addonDir . 'Plugin' . '.php')) {
+                continue;
+            }
+
+            $info = get_addons_info($name);
+            if (!isset($info['name'])) {
+                continue;
+            }
+
+            $list[$name] = $info;
+            return $list;
+        }
+
+        return [];
+    }
+}
+
+if (!function_exists('get_addons_info')) {
+    /**
+     * 读取插件基础信息
+     *
+     * @param string $name 插件名
+     * @return array
+     * @author windy
+     */
+    function get_addons_info(string $name): array
+    {
+        $addon = get_addons_instance($name);
+        if (!$addon) {
+            return [];
+        }
+
+        return $addon->getInfo();
+    }
+}
+
+if (!function_exists('set_addons_info')) {
+    /**
+     * 设置插件信息
+     *
+     * @param $name   (插件名称)
+     * @param $array  (插件数据)
+     * @return bool
+     * @throws Exception
+     * @author windy
+     */
+    function set_addons_info($name, $array): bool
+    {
+        $service = new Service(app());
+        $addonsPath = $service->getAddonsPath();
+
+        // 插件列表
+        $file  = $addonsPath . $name . DIRECTORY_SEPARATOR . 'service.ini';
+        $addon = get_addons_instance($name);
+        $array = $addon->setInfo($name, $array);
+
+        if (!isset($array['name']) || !isset($array['title']) || !isset($array['version'])) {
+            throw new Exception("Failed to write plugin config");
+        }
+
+        $res = array();
+        foreach ($array as $key => $val) {
+            if (is_array($val)) {
+                $res[] = "[$key]";
+                foreach ($val as $k => $v) {
+                    $res[] = "$k = " . (is_numeric($v) ? intval($v) : $v);
+                }
+            } else {
+                $res[] = "$key = " . (is_numeric($val) ? intval($val) : $val);
+            }
+        }
+
+        if ($handle = fopen($file, 'w')) {
+            fwrite($handle, implode("\n", $res) . "\n");
+            fclose($handle);
+        } else {
+            throw new Exception("File does not have write permission");
+        }
+        return true;
+    }
+}
+
+if (!function_exists('set_addons_config')) {
+    /**
+     * 设置插件配置
+     *
+     * @param $name  (插件名称)
+     * @param $array (配置数组)
+     * @return bool
+     * @throws Exception
+     * @author windy
+     */
+    function set_addons_config($name, $array): bool
+    {
+        $service = new Service(app());
+        $addonsPath = $service->getAddonsPath();
+
+        $file = $addonsPath . $name . DIRECTORY_SEPARATOR . 'config.php';
+        if (!is_really_writable($file)) {
+            throw new Exception(lang("addons.php File does not have write permission"));
+        }
+
+        if ($handle = fopen($file, 'w')) {
+            fwrite($handle, "<?php\n\n" . "return " . VarExporter::export($array) . ";");
+            fclose($handle);
+        } else {
+            throw new Exception(lang("File does not have write permission"));
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('refresh_addons_config')) {
+    /**
+     * 刷新插件配置
+     *
+     * @return bool
+     * @throws @\Symfony\Component\VarExporter\Exception\ExceptionInterface
+     * @author windy
+     */
+    function refresh_addons_config(): bool
+    {
+        $file = app()->getRootPath() . 'config' . DS . 'addons.php';
+        $config = autoload_addons_config(true);
+
+        if (!$config['autoload']) {
+            return false;
+        }
+
+        if (!is_really_writable($file)) {
+            throw new Exception(lang("addons.js File does not have write permission"));
+        }
+
+        if ($handle = fopen($file, 'w')) {
+            fwrite($handle, "<?php\n\n" . "return " . VarExporter::export($config) . ";");
+            fclose($handle);
+        } else {
+            throw new Exception(lang('File does not have write permission'));
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('autoload_addons_config')) {
+    /**
+     * 自动加载插件配置
+     *
+     * @param bool $chunk (true=清空手动配置的钩子)
+     * @return array
+     * @author windy
+     */
+    function autoload_addons_config(bool $chunk): array
+    {
+        // 读取插件的配置
+        $config = (array)Config::get('addons');
+        if ($chunk) {
+            $config['hooks'] = [];
+        }
+
+        // 读取插件目录及钩子列表
+        $route = [];
+        $base = get_class_methods("\\think\\Addons");
+        $base = array_merge($base, ['init','initialize','install', 'uninstall', 'enabled', 'disabled']);
+
+        $url_domain_deploy = Config::get('route.route_domain_deploy');
+        $addons = get_addons_list();
+        $domain = [];
+        foreach ($addons as $name => $addon) {
+            if (!$addon['install']) continue;
+            if (!$addon['status']) continue;
+            // 读取出所有的公共方法函数
+            $methods = (array)get_class_methods("\\addons\\" . $name . "\\" . 'Plugin');
+            // 跟插件基类方法比对得差异
+            $hooks = array_diff($methods, $base);
+            // 循环将钩子方法写入配置中
+            foreach ($hooks as $hook) {
+                $hook = Str::studly($hook);
+                if (!isset($config['hooks'][$hook])) {
+                    $config['hooks'][$hook] = [];
+                }
+                // 兼容手动配置项
+                if (is_string($config['hooks'][$hook])) {
+                    $config['hooks'][$hook] = explode(',', $config['hooks'][$hook]);
+                }
+                if (!in_array($name, $config['hooks'][$hook])) {
+                    $config['hooks'][$hook][] = $name;
+                }
+            }
+
+            $conf = get_addons_config($addon['name']);
+            if ($conf) {
+                $conf['rewrite'] = isset($conf['rewrite']) && is_array($conf['rewrite']) ? $conf['rewrite'] : [];
+                $rule = $conf['rewrite'] ? $conf['rewrite']['value'] : [];
+                if ($url_domain_deploy && isset($conf['domain']) && $conf['domain']) {
+                    $domain[] = [
+                        'addons' => $addon['name'],
+                        'domain' => $conf['domain']['value'],
+                        'rule'   => $rule
+                    ];
+                } else {
+                    $route = array_merge($route, $rule);
+                }
+            }
+        }
+
+        $config['route'] = $route;
+        $config['route'] = array_merge($config['route'], $domain);
+        return $config;
+    }
+}
+
+if (!function_exists('install_addons_sql')) {
+    /**
+     * 安装插件数据库
+     *
+     * @param string $name (插件名称)
+     * @return bool
+     * @throws Exception
+     * @author windy
+     */
+    function install_addons_sql(string $name): bool
+    {
+        $service = new Service(app());
+        $addonsPath = $service->getAddonsPath();
+        $sqlFile = $addonsPath . $name . DS . 'install.sql';
+        if (is_file($sqlFile)) {
+            $gz = fopen($sqlFile, 'r');
+            $sql = '';
+            while(1) {
+                $sql .= fgets($gz);
+                if(preg_match('/.*;$/', trim($sql))) {
+                    $sql = preg_replace('/(\/\*(\s|.)*?\*\/);/','',$sql);
+                    $sql = str_replace('__PREFIX__', config('database.connections.mysql.prefix'),$sql);
+                    if(str_contains($sql, 'CREATE TABLE')
+                        || str_contains($sql, 'INSERT INTO')
+                        || str_contains($sql, 'ALTER TABLE')
+                        || str_contains($sql, 'DROP TABLE'))
+                    {
+                        try {
+                            Db::execute($sql);
+                        } catch (Exception $e) {
+                            throw new Exception($e->getMessage());
+                        }
+                    }
+                    $sql = '';
+                }
+                if(feof($gz)) break;
+            }
+        }
+        return true;
+    }
+}
+
+if (!function_exists('uninstall_addons_sql')) {
+    /**
+     * 卸载插件数据库
+     *
+     * @param $name (插件名称)
+     * @return bool
+     * @throws Exception
+     * @author windy
+     */
+    function uninstall_addons_sql($name): bool
+    {
+        $service = new Service(app());
+        $addonsPath = $service->getAddonsPath();
+        $sqlFile = $addonsPath . $name . DS . 'uninstall.sql';
+        if (is_file($sqlFile)) {
+            $sql = file_get_contents($sqlFile);
+            $sql = str_replace('__PREFIX__', config('database.connections.mysql.prefix'),$sql);
+            $sql = explode("\r\n",$sql);
+            foreach ($sql as $v){
+                if(str_contains(strtolower($v), 'drop table')){
+                    try {
+                        Db::execute($v);
+                    } catch (Exception $e) {
+                        throw new Exception($e->getMessage());
+                    }
+                }
+
+            }
+        }
+        return true;
+    }
+}
+
+if (!function_exists('get_source_assets_dir')) {
+    /**
+     * 获取插件原始资源目录
+     *
+     * @param string $name (插件名称)
+     * @return string
+     * @author windy
+     */
+    function get_source_assets_dir(string $name): string
+    {
+        $path = app()->getRootPath() . 'addons/' . $name . DS . 'public' . DS;
+        return str_replace('\\', '/', $path);
+    }
+}
+
+if (!function_exists('get_target_assets_dir')) {
+    /**
+     * 获取插件目标资源目录
+     *
+     * @param string $name (插件名称)
+     * @return string
+     * @author windy
+     */
+    function get_target_assets_dir(string $name): string
+    {
+        return app()->getRootPath() . "public".DS."static".DS."addons".DS."$name".DS;
+    }
+}
+
+if (!function_exists('is_really_writable')) {
+    /**
+     * 是否有写入权限
+     *
+     * @param string $dir (目录)
+     * @return bool
+     * @author windy
+     */
+    function is_really_writable(string $dir): bool
+    {
+        if (DIRECTORY_SEPARATOR == '/' AND @ ini_get("safe_mode") == FALSE) {
+            return is_writable($dir);
+        }
+
+        if (!is_file($dir) OR ($fp = @fopen($dir, "r+")) === FALSE) {
+            return false;
+        }
+
+        fclose($fp);
+        return true;
+    }
+}
