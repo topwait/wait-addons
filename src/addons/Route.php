@@ -7,7 +7,7 @@
 // +----------------------------------------------------------------------
 declare(strict_types=1);
 
-namespace think\addons;
+namespace wait\addons;
 
 use think\facade\Request;
 use think\helper\Str;

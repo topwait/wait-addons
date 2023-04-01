@@ -7,10 +7,13 @@
 // +----------------------------------------------------------------------
 declare(strict_types=1);
 
-namespace think;
+namespace wait;
 
+use Exception;
+use think\facade\App;
 use think\facade\Config;
 use think\facade\View;
+use think\Request;
 
 abstract class Addons
 {
@@ -64,7 +67,7 @@ abstract class Addons
      * @param string $template 模板文件名
      * @param array $vars      模板输出变量
      * @return string          响应模板内容
-     * @throws \Exception
+     * @throws Exception
      * @author windy
      */
     protected function fetch(string $template = '', array $vars = []): string

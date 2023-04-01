@@ -17,7 +17,7 @@
     },
     "autoload": {
         "psr-4": {
-            "think\\": "src/"
+            "wait\\": "src/"
         },
         "files": [
             "src/helper.php"
