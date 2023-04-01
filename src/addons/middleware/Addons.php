@@ -7,7 +7,7 @@
 // +----------------------------------------------------------------------
 declare(strict_types=1);
 
-namespace think\addons\middleware;
+namespace wait\addons\middleware;
 
 use Closure;
 use think\App;

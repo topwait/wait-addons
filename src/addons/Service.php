@@ -7,7 +7,7 @@
 // +----------------------------------------------------------------------
 declare(strict_types=1);
 
-namespace think\addons;
+namespace wait\addons;
 
 use Exception;
 use FilesystemIterator;
@@ -17,7 +17,7 @@ use think\facade\Config;
 use think\facade\Lang;
 use think\facade\Cache;
 use think\facade\Event;
-use think\addons\middleware\Addons;
+use wait\addons\middleware\Addons;
 
 use RecursiveIteratorIterator;
 use RecursiveDirectoryIterator;
@@ -587,7 +587,7 @@ class Service extends \think\Service
         $assetDir = get_target_assets_dir($name);
 
         // 扫描插件目录是否有覆盖的文件
-        foreach (['app', 'public'] as $k => $dirName) {
+        foreach (['app', 'public'] as $dirName) {
             // 检测目录是否存在
             $addonPublicPath = $addonDir . $dirName . DS;
             if (!is_dir($addonPublicPath)) {
