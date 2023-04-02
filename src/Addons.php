@@ -10,7 +10,7 @@ declare(strict_types=1);
 namespace wait;
 
 use Exception;
-use think\facade\App;
+use think\App;
 use think\facade\Config;
 use think\facade\View;
 use think\Request;
