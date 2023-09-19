@@ -79,7 +79,7 @@ abstract class Addons
      * 渲染内容输出
      *
      * @param string $content 模板内容
-     * @param array $vars    模板输出变量
+     * @param array $vars     模板输出变量
      * @return mixed
      * @author zero
      */
